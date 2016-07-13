@@ -1,0 +1,362 @@
+// This program computes a series expansion for the affine Macdonald denominator
+// for U_q(sl_2 hat) as defined in the paper:
+//
+// P. Etingof and A. Kirillov Jr. On the affine analogue of Jack and Macdonald
+// polynomials. Duke Math. J., 78(2):229-256, 1995.
+//
+// It provides computational evidence for the affine Macdonald denominator
+// conjecture given in the paper:
+//
+// E. M. Rains, Y. Sun, and A. Varchenko.  Affine Macdonald conjectures and
+// special values of Felder-Varchenko functions.  Preprint, 2016.
+//
+// The expansion is done to first order in q^{-2\omega}.  The computation is
+// done by computing the first order expansion of a singular vector in
+// 
+// L_{k - 1, 2(k - 1)} \otimes L_{2(k - 1)}(z),
+//
+// where L_{k - 1, 2(k - 1)} is an integrable irreducible module for
+// U_q(sl_2 hat) and L_{2(k - 1)}(z) is an evaluation module for U_q(sl_2 hat).
+
+SetEchoInput(true);
+ZZ := Integers();
+F0 := Rationals();
+Qq<q> := FunctionField(F0, 1);
+M<f0, f1, p> := FreeAlgebra(Qq, 3);
+A<qlam, qomg> := FunctionField(Qq, 2);
+
+get_weight := function(mono, idx, pweight, plevel)
+	   ans := 0;
+	   for let_idx in [1..Length(mono)] do
+	       if (idx eq 1 and mono[let_idx] eq f1) or (idx eq 0 and mono[let_idx] eq f0) then
+	          ans := ans - 2;
+	       elif not(mono[let_idx] eq p) then
+		  ans := ans + 2;
+	       else
+		  if idx eq 1 then
+		     ans := ans + pweight;
+		  else
+		     ans := ans - pweight + plevel;
+		  end if;
+	       end if;
+           end for;
+	   return ans;
+end function;
+
+get_loop_weight := function(mono)
+		ans := 0;
+		for let_idx in [1..Length(mono)] do
+		    if mono[let_idx] eq f0 then
+		       ans := ans - 1;
+		    end if;
+		end for;
+		return ans;
+end function;
+
+get_ecomm := function(let, idx, weight)
+	  if (idx eq 1 and let eq f0) or (idx eq 0 and let eq f1) then
+	     return 0;
+	  else
+	     return (q^weight - 1/q^weight) / (q - 1/q);
+	  end if;
+end function;
+
+get_emult_mono := function(mono, idx, pweight, plevel)
+	  ans := 0;
+	  for let_idx in [1..Length(mono) - 1] do
+	      prev := 1; 
+	      for idx2 in [1..let_idx - 1] do
+	      	  prev := prev * mono[idx2];
+	      end for;
+	      after := 1;
+	      for idx3 in [let_idx + 1..Length(mono)] do
+	      	  after := after * mono[idx3];
+	      end for;
+	      weight := get_weight(after, idx, pweight, plevel);
+	      comm := get_ecomm(mono[let_idx], idx, weight);
+	      ans := ans + prev * comm * after;
+	  end for;
+	  return ans;
+end function;
+
+get_emult := function(term, idx, pweight, plevel)
+	  ans := 0;
+	  for mono in Monomials(term) do
+	      ans := ans + MonomialCoefficient(term, mono) * get_emult_mono(mono, idx, pweight, plevel);
+	  end for;
+	  return ans;
+end function;
+
+term_to_vector := function(term, monos)
+	  ans := [ MonomialCoefficient(term, mono) : mono in monos ];
+	  return ans;
+end function;
+
+qbinom := function(n)
+       nn := ZZ!n;
+       return (q^nn - 1/q^nn)/(q - 1/q);
+end function;
+
+get_trans_coeff := function(htens_weight, curr_weight, idx)
+       if idx eq 1 then
+          if htens_weight eq curr_weight then
+	     return 0;
+	  else
+   	     return qbinom((htens_weight - curr_weight) / 2);
+	  end if;
+       else
+          if htens_weight eq (- curr_weight) then
+	     return 0;
+	  else
+             return qbinom((htens_weight + curr_weight) / 2);
+	  end if;
+       end if;
+end function;
+
+get_f_trans_coeff := function(htens_weight, curr_weight, idx)
+       if idx eq 0 then
+          if htens_weight eq curr_weight then
+	     return 0;
+	  else
+   	     return qbinom((htens_weight - curr_weight) / 2);
+	  end if;
+       else
+          if htens_weight eq (- curr_weight) then
+	     return 0;
+	  else
+             return qbinom((htens_weight + curr_weight) / 2);
+	  end if;
+       end if;
+end function;
+
+get_tens_mult := function(vect, gen, htens_weight, pweight, plevel, curr_weight0, curr_weight1, gb)
+	      ans := M!0;
+	      if gen eq f1 then
+	      	 gen_idx := 1;
+	      else
+	         gen_idx := 0;
+              end if;
+	      for mono in Monomials(vect) do
+	      	  ans := ans + MonomialCoefficient(vect, mono) * get_f_trans_coeff(htens_weight, curr_weight1 - get_weight(mono, 1, pweight, plevel), gen_idx) * mono;
+		  if gen_idx eq 1 then
+		     weight_exp := curr_weight1 - get_weight(mono, 1, pweight, plevel);
+		  else
+		     weight_exp := -1 * curr_weight1 + get_weight(mono, 1, pweight, plevel);
+		  end if;
+		  
+		  ans := ans + MonomialCoefficient(vect, mono) * q^(- weight_exp) * NormalForm(gen * mono, gb);
+	      end for;
+	      return ans;
+end function;
+
+// Given the singular vector, compute the value of the intertwiner applied to
+// the monomial mono.
+get_inter_val := function(sing_vect, mono, htens_weight, pweight, plevel, gb)
+	      curr_weight0 := plevel - pweight;
+	      curr_weight1 := pweight;
+	      ans := sing_vect;
+	      for idx in [1..Length(mono)] do
+	          idx_mod := Length(mono) - idx + 1;
+	      	  if not(mono[idx_mod] eq p) then
+		     ans := get_tens_mult(ans, mono[idx_mod], htens_weight, pweight, plevel, curr_weight0, curr_weight1, gb);
+		     if mono[idx_mod] eq f1 then
+		     	curr_weight1 := curr_weight1 - 2;
+			curr_weight0 := curr_weight0 + 2;    
+	 	     else
+		        curr_weight0 := curr_weight0 - 2;    
+			curr_weight1 := curr_weight1 + 2;
+		     end if;	
+		  end if;
+	      end for;
+	      return ans;
+end function;
+
+// Compute the naive analogue of the trigonometric Macdonald denominator.
+get_tnorm := function(kk)
+	  ans := qlam^(kk - 1);
+	  for i in [1..kk - 1] do
+	  ans := ans * (1 - q^(2 * i) / qlam^2);
+	  end for;
+	  return ans;
+end function;
+
+// Return the trace of the U_q(sl_2 hat) intertwiner
+//
+// L_{kk - 1, 2(kk - 1)} \to L_{kk - 1, 2(kk - 1)} \otimes L_{2(kk - 1)}(z)
+//
+get_trace := function(kk)
+	  pweight := kk - 1;
+	  plevel := 2 * (kk - 1);
+	  htens_weight := 2 * (kk - 1);
+
+	  // Find Groebner basis for first few degrees of irreducible integrable
+	  // module using Serre relations.
+	  urels := [f0^3 * f1 - GaussianBinomial(3, 1, q)*f0*f0*f1*f0 + GaussianBinomial(3, 2, q)*f0*f1*f0*f0 - f1*f0^3,
+	  	    f1^3 * f0 - GaussianBinomial(3, 1, q)*f1*f1*f0*f1 + GaussianBinomial(3, 2, q)*f1*f0*f1*f1 - f0*f1^3];
+	  irels := [f1^(pweight + 1)];
+	  trels := [f0^2, f0 * f1 * f0, f0 * f1^2 * f0, f0 * f1^3 * f0, f0 * f1^4 * f0];
+	  I_gens := [p^2, p * f0, p * f1] cat urels cat [i * p : i in irels] cat trels;
+	  I := ideal<M | I_gens>;
+	  gb := GroebnerBasis(I_gens, pweight + 5);
+	  lgb := [LeadingMonomial(p) : p in gb];
+
+	  // Find basis of monomials for first few degrees of irreducible 
+	  // integrable module.
+	  monomials := [[p]];
+	  vars := [f1, f0, p];
+	  for i in [2..pweight+4] do
+	      monomials[i] := [r * s : r in vars, s in monomials[i - 1] | NormalForm(r * s, lgb) ne 0];
+	  end for;
+
+	  // Compute weights of each monomial.
+	  mono_list := [];
+	  weights0 := [];
+	  weights1 := [];
+	  loop_weights := [];
+	  mono_idx := 1;
+	  for deg_mono in monomials do
+	      for mono in deg_mono do
+	      	  mono_list[mono_idx] := mono;
+		  weights0[mono_idx] := get_weight(mono, 0, pweight, plevel);
+		  weights1[mono_idx] := get_weight(mono, 1, pweight, plevel);
+		  loop_weights[mono_idx] := get_loop_weight(mono);
+		  mono_idx := mono_idx + 1;
+	      end for;
+	  end for;
+	  num_mono := mono_idx - 1;
+
+	  // Compute actions of generators e_0 and e_1 on L_{kk - 1, 2(kk - 1)}.
+	  e0_mat := [ ];
+	  e1_mat := [ ];
+	  for idx in [1..num_mono] do
+	      mult0_res := get_emult(mono_list[idx], 0, pweight, plevel);
+	      if not(mult0_res eq 0) then
+	      	norm_mult0_res := NormalForm(mult0_res, gb);
+		e0_mat[idx] := [];
+		e0_mat[idx] := term_to_vector(norm_mult0_res, mono_list);
+	      else
+		e0_mat[idx] := [];
+		for idx2 in [1..num_mono] do
+		    e0_mat[idx][idx2] := Qq!0;
+		end for;
+	      end if;		
+
+	      mult1_res := get_emult(mono_list[idx], 1, pweight, plevel);
+	      if not(mult1_res eq 0) then
+	      	 norm_mult1_res := NormalForm(mult1_res, gb);
+		 e1_mat[idx] := [];
+		 e1_mat[idx] := term_to_vector(norm_mult1_res, mono_list);
+	      else
+		e1_mat[idx] := [];
+		for idx2 in [1..num_mono] do
+		    e1_mat[idx][idx2] := Qq!0;
+		end for;
+	      end if;
+	  end for;
+
+	  // Compute actions of generators e_0 and e_1 on the tensor product
+	  // 
+	  // L_{kk - 1, 2(kk - 1)} \otimes L_{2(kk - 1)}(z).
+	  // 
+	  // Recall that the coproduct is given by
+	  // 
+	  // \Delta(e_i) = e_i \otimes 1 + q^{h_i} \otimes e_i
+	  // 
+	  e0_tensmat := [];
+	  e1_tensmat := [];
+	  for i in [1..num_mono] do
+	      e0_tensmat[i] := [];
+	      for j in [1..num_mono] do 
+	      	  e0_tensmat[i][j] := e0_mat[i][j];
+	      end for;
+	      e0_tensmat[i][i] := q^(get_weight(mono_list[i], 0, pweight, plevel)) * get_trans_coeff(htens_weight, pweight - get_weight(mono_list[i], 1, pweight, plevel), 0);
+
+	      e1_tensmat[i] := [];
+	      for j in [1..num_mono] do 
+	      	  e1_tensmat[i][j] := e1_mat[i][j];
+	      end for;
+	      e1_tensmat[i][i] := q^(get_weight(mono_list[i], 1, pweight, plevel)) * get_trans_coeff(htens_weight, pweight - get_weight(mono_list[i], 1, pweight, plevel), 1);
+	  end for;
+	  x0 := Matrix(e0_tensmat);
+	  x1 := Matrix(e1_tensmat);
+	  xx := HorizontalJoin(x0, x1);
+
+	  // Filter rows of the matrix actions of e_0 and e_1 to include only
+	  // those landing in the degree 0 piece of L_{kk - 1, 2(kk - 1)}.
+	  y_monos := [];
+	  y0_seq := [];
+	  y1_seq := [];
+	  i_count := 1;
+	  for i in [1..num_mono] do 
+	      if (weights1[i] le pweight + htens_weight) and (weights1[i] ge pweight - htens_weight) then
+	      	 y1_seq[i_count] := [];
+		 y_monos[i_count] := mono_list[i];
+		 j_count := 1;
+		 for j in [1..num_mono] do
+		     if (weights1[j] le pweight + htens_weight) and (weights1[j] ge pweight - htens_weight) then
+		     	y1_seq[i_count][j_count] := x1[i][j];
+			j_count := j_count + 1;
+		     end if;
+		 end for;
+		 i_count := i_count + 1;
+	      end if;
+	  end for;
+	  i_count := 1;
+	  for i in [1..num_mono] do 
+	      if (weights1[i] le pweight + htens_weight) and (weights1[i] ge pweight - htens_weight) then
+	      	 y0_seq[i_count] := [];
+		 j_count := 1;
+		 for j in [1..num_mono] do
+		     if (weights1[j] le pweight + htens_weight) and (weights1[j] ge pweight - htens_weight) then
+		     	if (loop_weights[j] eq 0) then
+			   y0_seq[i_count][j_count] := x0[i][j];
+			else
+			   y0_seq[i_count][j_count] := Qq!0;
+			end if;
+			j_count := j_count + 1;
+		     end if;
+		 end for;
+		 i_count := i_count + 1;
+	     end if;
+	  end for;
+
+	  // Compute the singular vector up to degree 1.
+	  y0 := Matrix(y0_seq);
+	  y1 := Matrix(y1_seq);
+	  yy := HorizontalJoin(y0, y1);
+	  kernel := Kernel(yy);
+	  sv_temp := Basis(kernel)[1];
+	  sing_vect := M!0;
+	  for i in [1.. (# y_monos)] do
+	      sing_vect := sing_vect + sv_temp[i] * y_monos[i];
+	  end for;
+
+	  // Compute the intertwiner up to first order
+	  inter_mat := [];
+	  for i in [1..num_mono] do
+	      inter_mat[i] := term_to_vector(get_inter_val(sing_vect, mono_list[i], htens_weight, pweight, plevel, gb), mono_list);
+	  end for;
+
+	  // Compute trace up to first order
+	  trace := A!0;
+	  trace_parts := [];
+	  for i in [1..num_mono] do
+	      trace_parts[i] := inter_mat[i][i] * qlam^(weights1[i]) * qomg^(-loop_weights[i]);
+	      trace := trace + inter_mat[i][i] * qlam^(weights1[i]) * qomg^(-loop_weights[i]);
+	  end for;
+	  return trace, trace_parts;
+end function;
+
+// input parameters
+kk := 2;
+trace, trace_parts := get_trace(kk);
+
+// If kk = 2, test that computed answer matches theoretical prediction
+conj2 := (qlam - q^2 /qlam) * (1 + qomg * (q^4 - 2 * q^2 - qlam^2 * q^2 - q^2 / qlam^2));
+if kk eq 2 then
+   conj2 - trace;	
+end if;
+
+for i in [2..15] do
+    time print, get_trace(i) / get_tnorm(i);
+end for;
